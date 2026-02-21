@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>🌸 Chelsea’s Photobooth 🌸</title>
+
+<style>
+  body{
+    margin:0;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(180deg, #ffd6f2, #e8dcff);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:100vh;
+  }
+  .container{
+    width:360px;
+    background:white;
+    padding:20px;
+    border-radius:30px;
+    box-shadow:0 20px 60px rgba(0,0,0,0.15);
+    text-align:center;
+    position:relative;
+  }
+  h1{
+    margin:0 0 12px;
+    color:#ff4fa3;
+    font-size:22px;
+  }
+  .videoWrapper{ position:relative; }
+  video{
+    width:100%;
+    border-radius:20px;
+    background:#000;
+  }
+  .overlay{
+    position:absolute;
+    inset:0;
+    display:none;
+    justify-content:center;
+    align-items:center;
+    font-size:70px;
+    font-weight:bold;
+    color:white;
+    background: rgba(255,79,163,0.5);
+    border-radius:20px;
+  }
+  .msg{
+    display:none;
+    margin-top:10px;
+    padding:10px 12px;
+    background:#fff0fa;
+    border:2px dashed rgba(255,79,163,.45);
+    border-radius:14px;
+    color:#7a2e57;
+    font-weight:bold;
+    font-size:13px;
+    line-height:1.3;
+    white-space:pre-line;
+    text-align:left;
+  }
+  .btnRow{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    flex-wrap:wrap;
+    margin-top:10px;
+  }
+  button{
+    padding:10px 16px;
+    border:none;
+    border-radius:20px;
+    background:#ff4fa3;
+    color:white;
+    font-weight:bold;
+    cursor:pointer;
+  }
+  button:disabled{ opacity:.6; cursor:not-allowed; }
+  canvas{
+    width:100%;
+    margin-top:15px;
+    border-radius:20px;
+    background:#fff0fa;
+  }
+  .tiny{
+    font-size:12px;
+    color: rgba(0,0,0,.55);
+    margin-top:6px;
+  }
+
+  /* Calibration panel */
+  .panel{
+    display:none;
+    margin-top:10px;
+    padding:10px 12px;
+    border-radius:14px;
+    background:#fff0fa;
+    border:2px dashed rgba(255,79,163,.45);
+    text-align:left;
+    font-size:12px;
+    color:#7a2e57;
+  }
+  .row{ display:flex; align-items:center; gap:10px; margin:6px 0; }
+  .row label{ width:44px; font-weight:bold; }
+  .row input[type="range"]{ flex:1; }
+  .row .val{ width:52px; text-align:right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>🌸 Chelsea's Photo Booth 🌸</h1>
+
+    <div class="videoWrapper">
+      <video id="video" playsinline muted></video>
+      <div id="overlay" class="overlay"></div>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <div class="btnRow">
+      <button id="startBtn">Take 4 Photos</button>
+      <button id="retakeBtn">Retake</button>
+      <button id="downloadBtn">Download</button>
+      <button id="calBtn">Calibrate</button>
+    </div>
+
+    <div id="panel" class="panel">
+      <div style="font-weight:bold; margin-bottom:6px;">Calibrate holes (move/resize until outline matches frame windows)</div>
+
+      <div class="row">
+        <label>X</label>
+        <input id="xR" type="range" min="0" max="600" value="160">
+        <div class="val" id="xV">55</div>
+      </div>
+
+      <div class="row">
+        <label>Y</label>
+        <input id="yR" type="range" min="0" max="350" value="205">
+        <div class="val" id="yV">205</div>
+      </div>
+
+      <div class="row">
+        <label>W</label>
+        <input id="wR" type="range" min="120" max="380" value="190">
+        <div class="val" id="wV">190</div>
+      </div>
+
+      <div class="row">
+        <label>H</label>
+        <input id="hR" type="range" min="120" max="240" value="165">
+        <div class="val" id="hV">165</div>
+      </div>
+
+      <div class="row">
+        <label>Gap</label>
+        <input id="gR" type="range" min="150" max="320" value="235">
+        <div class="val" id="gV">235</div>
+      </div>
+
+      <div style="opacity:.8; margin-top:8px;">
+        Tip: When it lines up, click <b>Calibrate</b> again to hide this panel.
+      </div>
+    </div>
+
+    <canvas id="strip"></canvas>
+    <div id="frameLabel" class="tiny"></div>
+  </div>
+
+<script>
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("strip");
+  const ctx = canvas.getContext("2d");
+  const startBtn = document.getElementById("startBtn");
+  const overlay = document.getElementById("overlay");
+  const msg = document.getElementById("msg");
+  const frameLabel = document.getElementById("frameLabel");
+
+  const panel = document.getElementById("panel");
+  const calBtn = document.getElementById("calBtn");
+
+  const xR = document.getElementById("xR");
+  const yR = document.getElementById("yR");
+  const wR = document.getElementById("wR");
+  const hR = document.getElementById("hR");
+  const gR = document.getElementById("gR");
+
+  const xV = document.getElementById("xV");
+  const yV = document.getElementById("yV");
+  const wV = document.getElementById("wV");
+  const hV = document.getElementById("hV");
+  const gV = document.getElementById("gV");
+
+  let stream = null;
+  let isRunning = false;
+  let calibrateOn = false;
+
+  function showMsg(text){
+    msg.style.display = "block";
+    msg.textContent = text;
+  }
+  function hideMsg(){
+    msg.style.display = "none";
+    msg.textContent = "";
+  }              
+  function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+  // --- Frame auto-load (works whether index.html is in /photobooth OR /photobooth/assets) ---
+  const frame = new Image();
+  async function loadFrameAuto(){
+    const candidates = [
+      "assets/strip-frame.png",
+      "./strip-frame.png"
+    ];
+
+    for (const p of candidates){
+      const ok = await new Promise(resolve => {
+        const test = new Image();
+        test.onload = () => resolve(true);
+        test.onerror = () => resolve(false);
+        test.src = p + "?v=" + Date.now();
+      });
+      if(ok){
+        frame.src = p + "?v=" + Date.now();
+        frameLabel.textContent = "Frame loaded: " + p;
+        return true;
+      }
+    }
+    frameLabel.textContent = "Frame NOT found. Put strip-frame.png next to index.html OR in /assets.";
+    return false;
+  }
+
+  function setCanvasToFrameOrDefault(){
+    const w = frame.naturalWidth || 300;
+    const h = frame.naturalHeight || 1100;
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  function clearStrip(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = "#fff0fa";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+
+  function drawFrameOnTop(){
+    if(frame.complete && frame.naturalWidth > 0){
+      ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  function drawCover(img, x, y, w, h){
+    const iw = img.width, ih = img.height;
+    const scale = Math.max(w/iw, h/ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const dx = x + (w - dw) / 2;
+    const dy = y + (h - dh) / 2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+  }
+
+  function roundedRectPath(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function getHoleConfig(){
+    // These are PIXELS (not %) because we're matching your specific PNG visually.
+    // Works because we size canvas to the frame pixels.
+    return {
+      x: parseInt(xR.value, 10),
+      y0: parseInt(yR.value, 10),
+      w: parseInt(wR.value, 10),
+      h: parseInt(hR.value, 10),
+      gap: parseInt(gR.value, 10),
+      r: 18 // rounded corners clip
+    };
+  }
+
+  function redrawCalibrationPreview(){
+    setCanvasToFrameOrDefault();
+    clearStrip();
+    drawFrameOnTop();
+
+    if(!calibrateOn) return;
+
+    const {x,y0,w,h,gap,r} = getHoleConfig();
+    ctx.save();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(0, 255, 255, 0.95)"; // bright cyan outline
+    for(let i=0;i<4;i++){
+      const y = y0 + i*gap;
+      roundedRectPath(x,y,w,h,r);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function syncVals(){
+    xV.textContent = xR.value;
+    yV.textContent = yR.value;
+    wV.textContent = wR.value;
+    hV.textContent = hR.value;
+    gV.textContent = gR.value;
+  }
+  [xR,yR,wR,hR,gR].forEach(inp=>{
+    inp.addEventListener("input", ()=>{
+      syncVals();
+      redrawCalibrationPreview();
+    });
+  });
+  syncVals();
+
+  async function startCameraFromUserClick(){
+    hideMsg();
+    try{
+      if(stream){
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+
+      let tries = 0;
+      while((video.videoWidth === 0 || video.videoHeight === 0) && tries < 40){
+        await sleep(100);
+        tries++;
+      }
+      if(video.videoWidth === 0){
+        showMsg(
+          "Camera started but video didn’t load.\n" +
+          "Refresh, then try again.\n" +
+          "Safari: Settings → Websites → Camera → Allow for 127.0.0.1"
+        );
+        return false;
+      }
+      return true;
+    }catch(e){
+      showMsg(
+        "Camera blocked.\n\n" +
+        "Safari: Settings → Websites → Camera → Allow for 127.0.0.1\n" +
+        "Then refresh.\n\n" +
+        "Error: " + e.name
+      );
+      return false;
+    }
+  }
+
+  async function startSession(){
+    if(isRunning) return;
+    isRunning = true;
+    startBtn.disabled = true;
+
+    // Load frame
+    await loadFrameAuto();
+    setCanvasToFrameOrDefault();
+    clearStrip();
+    drawFrameOnTop();
+
+    // Start camera on click (Safari friendly)
+    const camOK = await startCameraFromUserClick();
+    if(!camOK){
+      overlay.style.display = "none";
+      startBtn.disabled = false;
+      isRunning = false;
+      return;
+    }
+
+    // Size canvas exactly to frame pixels for perfect fit
+    if(frame.complete && frame.naturalWidth > 0){
+      canvas.width = frame.naturalWidth;
+      canvas.height = frame.naturalHeight;
+      clearStrip();
+    }
+
+    const {x,y0,w,h,gap,r} = getHoleConfig();
+
+    for(let i=0; i<4; i++){
+      // countdown
+      for(let c=3; c>0; c--){
+        overlay.style.display = "flex";
+        overlay.style.background = "rgba(255,79,163,0.5)";
+        overlay.textContent = c;
+        await sleep(700);
+      }
+
+      // flash
+      overlay.textContent = "";
+      overlay.style.background = "white";
+      await sleep(150);
+      overlay.style.display = "none";
+
+      // capture
+      const temp = document.createElement("canvas");
+      temp.width = video.videoWidth;
+      temp.height = video.videoHeight;
+      const tctx = temp.getContext("2d");
+      tctx.drawImage(video, 0, 0);
+
+      const img = new Image();
+      img.src = temp.toDataURL("image/png");
+      await new Promise(res => img.onload = res);
+
+      // Draw into rounded hole with clipping
+      const yy = y0 + i*gap;
+      ctx.save();
+      roundedRectPath(x,yy,w,h,r);
+      ctx.clip();
+      drawCover(img, x, yy, w, h);
+      ctx.restore();
+
+      await sleep(700);
+    }
+
+    // Frame on top last (included in download)
+    drawFrameOnTop();
+
+    startBtn.disabled = false;
+    isRunning = false;
+  }
+
+  function retake(){
+    setCanvasToFrameOrDefault();
+    clearStrip();
+    drawFrameOnTop();
+    if(calibrateOn) redrawCalibrationPreview();
+  }
+
+  function downloadStrip(){
+    const a = document.createElement("a");
+    a.download = "photostrip.png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  }
+
+  startBtn.onclick = startSession;
+  document.getElementById("retakeBtn").onclick = retake;
+  document.getElementById("downloadBtn").onclick = downloadStrip;
+
+  calBtn.onclick = () => {
+    calibrateOn = !calibrateOn;
+    panel.style.display = calibrateOn ? "block" : "none";
+    redrawCalibrationPreview();
+  };
+
+  // Init: load frame + show it immediately in strip area
+  (async () => {
+    await loadFrameAuto();
+    setCanvasToFrameOrDefault();
+    clearStrip();
+    drawFrameOnTop();
+  })();
+</script>
+</body>
+</html>
